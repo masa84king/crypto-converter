@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="silver" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#d4d4d8"/>
+    </linearGradient>
+    <linearGradient id="bronze" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fdba74"/>
+      <stop offset="100%" stop-color="#c2410c"/>
+    </linearGradient>
+    <linearGradient id="btcGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+    <linearGradient id="ethGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#4c1d95"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="200" fill="none" stroke="white" stroke-width="2" opacity="0.08"/>
+  <circle cx="256" cy="256" r="160" fill="none" stroke="white" stroke-width="1.5" opacity="0.1"/>
+  <circle cx="80" cy="120" r="4" fill="white" opacity="0.4"/>
+  <circle cx="440" cy="100" r="3" fill="white" opacity="0.4"/>
+  <circle cx="460" cy="400" r="3" fill="white" opacity="0.35"/>
+  <circle cx="70" cy="390" r="4" fill="white" opacity="0.35"/>
+  <circle cx="150" cy="70" r="2.5" fill="white" opacity="0.5"/>
+  <circle cx="400" cy="450" r="2.5" fill="white" opacity="0.4"/>
+  <g transform="translate(256, 256)">
+    <ellipse cx="0" cy="120" rx="110" ry="14" fill="black" opacity="0.15"/>
+    <circle cx="0" cy="0" r="115" fill="url(#btcGrad)" stroke="#92400e" stroke-width="4"/>
+    <circle cx="0" cy="0" r="100" fill="none" stroke="#fef3c7" stroke-width="2" opacity="0.5"/>
+    <ellipse cx="-30" cy="-40" rx="45" ry="30" fill="white" opacity="0.25"/>
+    <text x="0" y="45" text-anchor="middle" font-family="Arial, sans-serif" font-size="165" font-weight="900" fill="white">₿</text>
+  </g>
+  <g transform="translate(110, 130) rotate(-12)">
+    <ellipse cx="0" cy="55" rx="52" ry="7" fill="black" opacity="0.12"/>
+    <circle cx="0" cy="0" r="55" fill="url(#silver)" stroke="#71717a" stroke-width="3"/>
+    <circle cx="0" cy="0" r="47" fill="none" stroke="#e4e4e7" stroke-width="1.5" opacity="0.7"/>
+    <ellipse cx="-15" cy="-20" rx="22" ry="14" fill="white" opacity="0.6"/>
+    <text x="0" y="22" text-anchor="middle" font-family="Arial, sans-serif" font-size="75" font-weight="900" fill="#3f3f46">¥</text>
+  </g>
+  <g transform="translate(410, 120) rotate(15)">
+    <ellipse cx="0" cy="50" rx="48" ry="6" fill="black" opacity="0.12"/>
+    <circle cx="0" cy="0" r="50" fill="url(#gold)" stroke="#a16207" stroke-width="3"/>
+    <circle cx="0" cy="0" r="43" fill="none" stroke="#fef3c7" stroke-width="1.5" opacity="0.6"/>
+    <ellipse cx="-12" cy="-18" rx="20" ry="12" fill="white" opacity="0.5"/>
+    <text x="0" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="68" font-weight="900" fill="#78350f">$</text>
+  </g>
+  <g transform="translate(420, 400) rotate(-10)">
+    <ellipse cx="0" cy="45" rx="42" ry="5" fill="black" opacity="0.12"/>
+    <circle cx="0" cy="0" r="45" fill="url(#ethGrad)" stroke="#3b0764" stroke-width="3"/>
+    <circle cx="0" cy="0" r="38" fill="none" stroke="#ddd6fe" stroke-width="1.5" opacity="0.6"/>
+    <ellipse cx="-10" cy="-15" rx="18" ry="10" fill="white" opacity="0.4"/>
+    <g fill="white">
+      <path d="M 0 -22 L 15 3 L 0 12 L -15 3 Z" opacity="0.95"/>
+      <path d="M 0 16 L 15 7 L 0 30 L -15 7 Z" opacity="0.8"/>
+    </g>
+  </g>
+  <g transform="translate(95, 395) rotate(12)">
+    <ellipse cx="0" cy="48" rx="46" ry="6" fill="black" opacity="0.12"/>
+    <circle cx="0" cy="0" r="48" fill="url(#bronze)" stroke="#7c2d12" stroke-width="3"/>
+    <circle cx="0" cy="0" r="41" fill="none" stroke="#fed7aa" stroke-width="1.5" opacity="0.6"/>
+    <ellipse cx="-12" cy="-16" rx="19" ry="11" fill="white" opacity="0.45"/>
+    <text x="0" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="65" font-weight="900" fill="#431407">€</text>
+  </g>
+  <g fill="white">
+    <path d="M 180 90 L 184 100 L 194 104 L 184 108 L 180 118 L 176 108 L 166 104 L 176 100 Z" opacity="0.85"/>
+    <path d="M 340 420 L 343 428 L 351 431 L 343 434 L 340 442 L 337 434 L 329 431 L 337 428 Z" opacity="0.8"/>
+    <path d="M 60 260 L 62 266 L 68 268 L 62 270 L 60 276 L 58 270 L 52 268 L 58 266 Z" opacity="0.7"/>
+  </g>
+</svg>

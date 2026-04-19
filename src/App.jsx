@@ -1,0 +1,1153 @@
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { ArrowDownUp, Search, X, Share2, Clock, History, Check, RefreshCw, TrendingUp, Loader2, Pin, PinOff } from "lucide-react";
+
+// ─────────────────────────────────────────
+// localStorage-based storage shim (Claude Artifactの window.storage 互換)
+// ─────────────────────────────────────────
+if (typeof window !== "undefined" && !window.storage) {
+  window.storage = {
+    async get(key) {
+      const v = localStorage.getItem(key);
+      return v === null ? null : { key, value: v };
+    },
+    async set(key, value) {
+      localStorage.setItem(key, value);
+      return { key, value };
+    },
+    async delete(key) {
+      localStorage.removeItem(key);
+      return { key, deleted: true };
+    },
+    async list(prefix = "") {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(prefix)) keys.push(k);
+      }
+      return { keys, prefix };
+    },
+  };
+}
+
+
+// ─────────────────────────────────────────
+// fawazahmed0 Currency API (jsDelivr CDN)
+//   ・300+通貨(法定通貨+全仮想通貨)
+//   ・無料・無認証・レート制限なし・CORS完全対応
+//   ・毎日更新
+// ─────────────────────────────────────────
+const API_PRIMARY  = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1";
+const API_FALLBACK = "https://latest.currency-api.pages.dev/v1";
+
+// 通貨コード → 国旗/アイコン情報
+// 主要法定通貨の国コード(国旗絵文字用)
+const FIAT_FLAGS = {
+  usd: "🇺🇸", eur: "🇪🇺", jpy: "🇯🇵", gbp: "🇬🇧", cny: "🇨🇳", krw: "🇰🇷",
+  aud: "🇦🇺", cad: "🇨🇦", chf: "🇨🇭", hkd: "🇭🇰", sgd: "🇸🇬", twd: "🇹🇼",
+  inr: "🇮🇳", thb: "🇹🇭", idr: "🇮🇩", php: "🇵🇭", vnd: "🇻🇳", myr: "🇲🇾",
+  nzd: "🇳🇿", sek: "🇸🇪", nok: "🇳🇴", dkk: "🇩🇰", pln: "🇵🇱", czk: "🇨🇿",
+  huf: "🇭🇺", rub: "🇷🇺", try: "🇹🇷", brl: "🇧🇷", mxn: "🇲🇽", zar: "🇿🇦",
+  aed: "🇦🇪", sar: "🇸🇦", ils: "🇮🇱", ars: "🇦🇷", clp: "🇨🇱", cop: "🇨🇴",
+  pen: "🇵🇪", egp: "🇪🇬", ngn: "🇳🇬", ken: "🇰🇪", isk: "🇮🇸", bgn: "🇧🇬",
+  ron: "🇷🇴", hrk: "🇭🇷", uah: "🇺🇦", bdt: "🇧🇩", pkr: "🇵🇰", lkr: "🇱🇰",
+  qar: "🇶🇦", kwd: "🇰🇼", bhd: "🇧🇭", omr: "🇴🇲", jod: "🇯🇴", mad: "🇲🇦",
+  tnd: "🇹🇳", dzd: "🇩🇿", iqd: "🇮🇶", irr: "🇮🇷", yer: "🇾🇪", lbp: "🇱🇧",
+  syp: "🇸🇾", afn: "🇦🇫", kzt: "🇰🇿", uzs: "🇺🇿", tjs: "🇹🇯", mnt: "🇲🇳",
+  mmk: "🇲🇲", khr: "🇰🇭", lak: "🇱🇦", npr: "🇳🇵", btc: "₿", eth: "Ξ",
+};
+
+// よく使われる通貨(優先表示)
+const PRIORITY = ["jpy", "usd", "eur", "gbp", "cny", "krw", "btc", "eth", "usdt", "bnb", "sol", "xrp", "usdc", "ada", "doge", "aud", "cad", "chf", "hkd", "sgd"];
+
+// 既知の法定通貨コード(ISO 4217) - これ以外はすべて仮想通貨扱い
+const FIAT_CODES = new Set(["aed","afn","all","amd","ang","aoa","ars","aud","awg","azn","bam","bbd","bdt","bgn","bhd","bif","bmd","bnd","bob","brl","bsd","btn","bwp","byn","bzd","cad","cdf","chf","clp","cny","cop","crc","cup","cve","czk","djf","dkk","dop","dzd","egp","ern","etb","eur","fjd","fkp","fok","gbp","gel","ggp","ghs","gip","gmd","gnf","gtq","gyd","hkd","hnl","hrk","htg","huf","idr","ils","imp","inr","iqd","irr","isk","jep","jmd","jod","jpy","kes","kgs","khr","kid","kmf","krw","kwd","kyd","kzt","lak","lbp","lkr","lrd","lsl","lyd","mad","mdl","mga","mkd","mmk","mnt","mop","mru","mur","mvr","mwk","mxn","myr","mzn","nad","ngn","nio","nok","npr","nzd","omr","pab","pen","pgk","php","pkr","pln","pyg","qar","ron","rsd","rub","rwf","sar","sbd","scr","sdg","sek","sgd","shp","sle","sll","sos","srd","ssp","stn","syp","szl","thb","tjs","tmt","tnd","top","try","ttd","tvd","twd","tzs","uah","ugx","usd","uyu","uzs","ves","vnd","vuv","wst","xaf","xcd","xdr","xof","xpf","yer","zar","zmw","zwl"]);
+
+// 通貨記号
+const SYMBOLS = {
+  jpy: "¥", usd: "$", eur: "€", gbp: "£", cny: "¥", krw: "₩", inr: "₹",
+  thb: "฿", vnd: "₫", php: "₱", try: "₺", ils: "₪", rub: "₽", aud: "A$",
+  cad: "C$", nzd: "NZ$", sgd: "S$", hkd: "HK$", twd: "NT$", chf: "Fr",
+  brl: "R$", mxn: "Mex$", zar: "R", sek: "kr", nok: "kr", dkk: "kr",
+  pln: "zł", czk: "Kč", huf: "Ft", idr: "Rp", myr: "RM", aed: "د.إ",
+  sar: "﷼", btc: "₿", eth: "Ξ",
+};
+
+// 日本語名
+const JP_NAMES = {
+  jpy: "日本円", usd: "米ドル", eur: "ユーロ", gbp: "英ポンド", cny: "中国人民元",
+  krw: "韓国ウォン", aud: "豪ドル", cad: "加ドル", chf: "スイスフラン",
+  hkd: "香港ドル", sgd: "シンガポールドル", twd: "台湾ドル", inr: "インドルピー",
+  thb: "タイバーツ", idr: "インドネシアルピア", php: "フィリピンペソ",
+  vnd: "ベトナムドン", myr: "マレーシアリンギット", nzd: "NZドル",
+  sek: "スウェーデンクローナ", nok: "ノルウェークローネ", dkk: "デンマーククローネ",
+  pln: "ポーランドズウォティ", czk: "チェココルナ", huf: "ハンガリーフォリント",
+  rub: "ロシアルーブル", try: "トルコリラ", brl: "ブラジルレアル",
+  mxn: "メキシコペソ", zar: "南アフリカランド", aed: "UAEディルハム",
+  sar: "サウジリヤル", ils: "イスラエルシェケル", btc: "ビットコイン",
+  eth: "イーサリアム", usdt: "テザー", bnb: "BNB", sol: "ソラナ",
+  xrp: "リップル", usdc: "USDコイン", ada: "カルダノ", doge: "ドージコイン",
+  avax: "アバランチ", trx: "トロン", dot: "ポルカドット",
+  link: "チェーンリンク", matic: "ポリゴン", ltc: "ライトコイン",
+  shib: "シバイヌ", uni: "ユニスワップ", atom: "コスモス",
+  xlm: "ステラルーメン", xmr: "モネロ", near: "ニア", apt: "アプトス",
+  arb: "アービトラム", op: "オプティミズム", fil: "ファイルコイン",
+  bch: "ビットコインキャッシュ", etc: "イーサリアムクラシック",
+  algo: "アルゴランド", vet: "ヴィチェーン", icp: "インターネットコンピューター",
+};
+
+// 仮想通貨の公式アイコン(cryptocurrency-icons CDN経由・SVG)
+function coinIconUrl(code) {
+  return `https://cdn.jsdelivr.net/npm/cryptocurrency-icons@latest/svg/color/${code.toLowerCase()}.svg`;
+}
+
+// ─────────────────────────────────────────
+async function fetchJson(path) {
+  try {
+    const r = await fetch(`${API_PRIMARY}${path}`);
+    if (r.ok) return await r.json();
+  } catch {}
+  const r2 = await fetch(`${API_FALLBACK}${path}`);
+  if (!r2.ok) throw new Error(`API error ${r2.status}`);
+  return await r2.json();
+}
+
+// ─────────────────────────────────────────
+export default function App() {
+  const [now, setNow] = useState(new Date());
+  const [amount, setAmount] = useState("1");       // FROM側の入力値
+  const [amountTo, setAmountTo] = useState("");     // TO側の入力値
+  const [editSide, setEditSide] = useState("from"); // "from" or "to" - どちらを直接編集したか
+  const [from, setFrom] = useState(null);
+  const [to, setTo] = useState(null);
+  const [fee, setFee] = useState("0");
+  const [feeCurrency, setFeeCurrency] = useState("to"); // "from" | "to"
+  const [rate, setRate] = useState(null);
+  const [rateTimestamp, setRateTimestamp] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [pinned, setPinned] = useState([]); // ピン留め通貨コード配列
+  const [currencies, setCurrencies] = useState({}); // { code: name }
+  const [initLoading, setInitLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [shareMenu, setShareMenu] = useState(false);
+  const [flipping, setFlipping] = useState(false);
+
+  // 時計
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // 履歴のロード(localStorage優先)
+  useEffect(() => {
+    (async () => {
+      try {
+        if (typeof localStorage !== "undefined") {
+          const raw = localStorage.getItem("conv-hist-v4");
+          if (raw) {
+            setHistory(JSON.parse(raw));
+            return;
+          }
+        }
+        const r = await window.storage.get("conv-hist-v4");
+        if (r?.value) setHistory(JSON.parse(r.value));
+      } catch (e) {
+        console.warn("履歴の読み込みに失敗:", e);
+      }
+    })();
+  }, []);
+
+  // ピン留めのロード(localStorage優先、失敗時にwindow.storageフォールバック)
+  useEffect(() => {
+    (async () => {
+      try {
+        // まずlocalStorageから直接試す(PWAで最速)
+        if (typeof localStorage !== "undefined") {
+          const raw = localStorage.getItem("pinned-v1");
+          if (raw) {
+            setPinned(JSON.parse(raw));
+            return;
+          }
+        }
+        // フォールバック:window.storage経由
+        const r = await window.storage.get("pinned-v1");
+        if (r?.value) setPinned(JSON.parse(r.value));
+      } catch (e) {
+        console.warn("ピン留めの読み込みに失敗:", e);
+      }
+    })();
+  }, []);
+
+  // ピン留めトグル(localStorageとwindow.storageの両方に保存)
+  const togglePin = useCallback((code) => {
+    setPinned(prev => {
+      const next = prev.includes(code)
+        ? prev.filter(c => c !== code)
+        : [code, ...prev];
+      const serialized = JSON.stringify(next);
+      // localStorage直接保存(即時・同期)
+      try {
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem("pinned-v1", serialized);
+        }
+      } catch (e) {
+        console.warn("localStorage保存失敗:", e);
+      }
+      // window.storage経由でも保存(Claude Artifact互換)
+      if (window.storage && window.storage.set) {
+        window.storage.set("pinned-v1", serialized).catch(() => {});
+      }
+      return next;
+    });
+  }, []);
+
+  // 初期ロード:通貨一覧取得
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await fetchJson("/currencies.min.json");
+        setCurrencies(data);
+        // デフォルト選択
+        setFrom({ code: "btc", name: data.btc || "Bitcoin", type: "crypto" });
+        setTo({   code: "jpy", name: data.jpy || "Japanese yen", type: "fiat" });
+      } catch (e) {
+        setError("通貨リスト取得失敗");
+      } finally {
+        setInitLoading(false);
+      }
+    })();
+  }, []);
+
+  // レート取得(from→to)
+  const fetchRate = useCallback(async (f, t) => {
+    if (!f || !t) return;
+    if (f.code === t.code) {
+      setRate(1);
+      setRateTimestamp(new Date());
+      setError(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchJson(`/currencies/${f.code}.min.json`);
+      // レスポンス: { date: "...", <f.code>: { <target>: rate, ... } }
+      const rateMap = data[f.code];
+      const r = rateMap?.[t.code];
+      if (!r || !isFinite(r) || r <= 0) throw new Error("レート取得失敗");
+      setRate(r);
+      setRateTimestamp(new Date());
+    } catch (e) {
+      setError(e.message || "通信エラー");
+      setRate(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!from || !to) return;
+    const timer = setTimeout(() => fetchRate(from, to), 400);
+    return () => clearTimeout(timer);
+  }, [from, to, fetchRate]);
+
+  // 履歴保存
+  const saveToHistory = useCallback((f, t) => {
+    const key = `${f.type}:${f.code}→${t.type}:${t.code}`;
+    const entry = { fromCode: f.code, fromType: f.type, toCode: t.code, toType: t.type, ts: Date.now() };
+    setHistory(prev => {
+      const filtered = prev.filter(h => `${h.fromType}:${h.fromCode}→${h.toType}:${h.toCode}` !== key);
+      const next = [entry, ...filtered].slice(0, 20);
+      const serialized = JSON.stringify(next);
+      try {
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem("conv-hist-v4", serialized);
+        }
+      } catch {}
+      if (window.storage && window.storage.set) {
+        window.storage.set("conv-hist-v4", serialized).catch(() => {});
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (rate && !error && from && to) {
+      const id = setTimeout(() => saveToHistory(from, to), 1200);
+      return () => clearTimeout(id);
+    }
+  }, [rate, error, from, to, saveToHistory]);
+
+  const swap = () => {
+    setFlipping(true);
+    setTimeout(() => setFlipping(false), 350);
+    setFrom(to);
+    setTo(from);
+    setAmount(amountTo || String(net || ""));
+    setAmountTo(amount);
+    setEditSide(editSide === "from" ? "to" : "from");
+  };
+
+  const clearHistory = async () => {
+    setHistory([]);
+    try {
+      if (typeof localStorage !== "undefined") localStorage.removeItem("conv-hist-v4");
+    } catch {}
+    try { await window.storage.delete("conv-hist-v4"); } catch {}
+  };
+
+  // データのバックアップ(JSONをクリップボード/共有)
+  const exportData = async () => {
+    const data = {
+      pinned,
+      history,
+      exportedAt: new Date().toISOString(),
+      version: 1,
+    };
+    const json = JSON.stringify(data, null, 2);
+    // Web Share APIが使えるならファイル共有、なければクリップボード
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "通貨換算ツール バックアップ",
+          text: json,
+        });
+        return;
+      } catch {}
+    }
+    try {
+      await navigator.clipboard.writeText(json);
+      alert("バックアップをクリップボードにコピーしました。\nメモアプリ等に貼り付けて保存してください。");
+    } catch {
+      // フォールバック:ダウンロード
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `currency-converter-backup-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  // データの復元(JSONを貼り付けて取り込む)
+  const importData = async () => {
+    const json = prompt("バックアップのJSONを貼り付けてください:");
+    if (!json) return;
+    try {
+      const data = JSON.parse(json);
+      if (Array.isArray(data.pinned)) {
+        setPinned(data.pinned);
+        try {
+          localStorage.setItem("pinned-v1", JSON.stringify(data.pinned));
+        } catch {}
+      }
+      if (Array.isArray(data.history)) {
+        setHistory(data.history);
+        try {
+          localStorage.setItem("conv-hist-v4", JSON.stringify(data.history));
+        } catch {}
+      }
+      alert(`復元しました。\nピン留め: ${data.pinned?.length || 0}件\n履歴: ${data.history?.length || 0}件`);
+    } catch (e) {
+      alert("JSONの読み取りに失敗しました。形式が正しいか確認してください。");
+    }
+  };
+
+  // ─────────────────────────────────────────
+  // 双方向計算:editSideに応じて方向を切り替え
+  // from→to: net = amt × rate × (1 - fee/100)
+  // to→from: amt = target / (rate × (1 - fee/100))
+  // ─────────────────────────────────────────
+  const feeP = Math.max(0, Math.min(100, parseFloat(fee) || 0));
+  const feeFactor = 1 - feeP / 100;
+
+  let amt, net;
+  if (editSide === "from") {
+    amt = parseFloat(amount) || 0;
+    net = rate ? amt * rate * feeFactor : 0;
+  } else {
+    // TO側編集中:受取額目標から必要な支払額を逆算
+    net = parseFloat(amountTo) || 0;
+    amt = rate && feeFactor > 0 ? net / (rate * feeFactor) : 0;
+  }
+
+  const gross = rate ? amt * rate : 0; // 手数料差引き前の受取額
+  // 手数料額:To通貨建て と From通貨建ての両方を計算
+  const feeAmountTo = gross - net;                    // To通貨での手数料
+  const feeAmountFrom = amt * (feeP / 100);           // From通貨での手数料
+  const feeAmountDisplay = feeCurrency === "from" ? feeAmountFrom : feeAmountTo;
+  const feeCurrencyObj = feeCurrency === "from" ? from : to;
+
+  const fmt = (n, type) => {
+    if (!isFinite(n) || n === null || n === undefined) return "—";
+    if (type === "crypto") {
+      if (n === 0) return "0";
+      if (Math.abs(n) < 0.00001) return n.toExponential(4);
+      if (Math.abs(n) < 1) return n.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+      return n.toLocaleString("ja-JP", { maximumFractionDigits: 8 });
+    }
+    return n.toLocaleString("ja-JP", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+  };
+
+  // ─────────────────────────────────────────
+  // 入力値をカンマ区切り表示するフォーマッタ
+  // "1234567.89" → "1,234,567.89"
+  // "1234567."   → "1,234,567."  (小数点入力中も保持)
+  // ─────────────────────────────────────────
+  const formatInput = (s) => {
+    if (!s) return "";
+    const [int, dec] = s.split(".");
+    const formattedInt = int ? Number(int).toLocaleString("en-US") : "";
+    if (s.includes(".")) return formattedInt + "." + (dec || "");
+    return formattedInt;
+  };
+  // カンマを除去して数値文字列にする
+  const unformatInput = (s) => (s || "").replace(/,/g, "");
+
+  const shareText = () => {
+    if (!from || !to) return "";
+    const dt = now.toLocaleString("ja-JP");
+    return `💱 ${fmt(amt, from.type)} ${from.code.toUpperCase()} → ${fmt(net, to.type)} ${to.code.toUpperCase()}\nレート: 1 ${from.code.toUpperCase()} = ${fmt(rate, to.type)} ${to.code.toUpperCase()}\n手数料前: ${fmt(gross, to.type)} ${to.code.toUpperCase()}\n手数料: ${feeP}% (-${fmt(feeAmountDisplay, feeCurrencyObj?.type)} ${feeCurrencyObj?.code.toUpperCase()})\n(${dt})`;
+  };
+
+  const doShare = async () => {
+    const text = shareText();
+    if (navigator.share) {
+      try { await navigator.share({ title: "変換レート", text }); return; } catch {}
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {}
+  };
+
+  const shareX = () => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText())}`, "_blank");
+  const shareLine = () => window.open(`https://line.me/R/msg/text/?${encodeURIComponent(shareText())}`, "_blank");
+  const shareWA = () => window.open(`https://wa.me/?text=${encodeURIComponent(shareText())}`, "_blank");
+
+  const dateStr = now.toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" });
+  const timeStr = now.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  if (initLoading) {
+    return (
+      <div className="min-h-screen bg-white text-zinc-900 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mx-auto mb-3" />
+          <div className="text-sm text-zinc-400">通貨リストを取得中...</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-white text-zinc-900" style={{ fontFamily: "'Instrument Sans', system-ui, sans-serif" }}>
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-emerald-300/20 blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-cyan-300/20 blur-3xl" />
+      </div>
+
+      <div className="relative max-w-md mx-auto px-5 pt-6 pb-32">
+        <header className="mb-6">
+          <div className="flex items-start justify-between mb-1">
+            <div className="flex items-start gap-3">
+              <img
+                src="/icon-192.png"
+                alt="通貨換算ツール"
+                className="w-12 h-12 rounded-2xl shadow-md shrink-0"
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.3em] text-emerald-600/90 mb-1">
+                  CURRENCY EXCHANGE TOOL
+                </div>
+                <h1 className="text-2xl font-black tracking-tight leading-none">
+                  通貨換算ツール<span className="text-emerald-600">.</span>
+                </h1>
+                <div className="text-[10px] text-zinc-500 mt-1">
+                  {Object.keys(currencies).length}種の通貨対応
+                </div>
+              </div>
+            </div>
+            <div className="text-right" style={{ fontFamily: "'JetBrains Mono', 'SF Mono', monospace" }}>
+              <div className="flex items-center justify-end gap-1 text-[11px] text-zinc-500">
+                <Clock className="w-3 h-3" /> LIVE
+              </div>
+              <div className="text-xs text-zinc-500">{dateStr}</div>
+              <div className="text-lg tabular-nums text-emerald-600 font-bold">{timeStr}</div>
+            </div>
+          </div>
+        </header>
+
+        <div className={`bg-white border border-zinc-200 rounded-3xl p-5 shadow-xl shadow-zinc-200/60 transition-transform duration-300 ${flipping ? "scale-[0.98]" : ""}`}>
+          {/* FROM */}
+          <CurrencyRow
+            label="支払う (FROM)"
+            currency={from}
+            onPick={() => setPickerOpen("from")}
+            rightContent={
+              <>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={
+                    editSide === "from"
+                      ? formatInput(amount)
+                      : (amt > 0 ? formatInput(String(Number(amt.toPrecision(10)))) : "")
+                  }
+                  onFocus={(e) => {
+                    if (editSide !== "from") {
+                      setAmount(amt > 0 ? String(Number(amt.toPrecision(10))) : "");
+                      setEditSide("from");
+                    }
+                    // タップした瞬間に既存値を全選択 → そのまま上書き入力できる
+                    setTimeout(() => e.target.select(), 0);
+                  }}
+                  onChange={e => {
+                    setEditSide("from");
+                    setAmount(unformatInput(e.target.value).replace(/[^0-9.]/g, ""));
+                  }}
+                  className={`flex-1 bg-transparent text-right text-2xl font-bold outline-none tabular-nums w-0 min-w-0 ${editSide === "from" ? "text-zinc-900" : "text-emerald-600"}`}
+                  placeholder="0"
+                />
+                {((editSide === "from" && amount) || (editSide !== "from" && amt > 0)) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAmount("");
+                      setAmountTo("");
+                      setEditSide("from");
+                    }}
+                    className="shrink-0 p-1 rounded-full hover:bg-zinc-200 active:bg-zinc-300 transition"
+                    aria-label="クリア"
+                  >
+                    <X className="w-4 h-4 text-zinc-400" />
+                  </button>
+                )}
+              </>
+            }
+          />
+
+          <div className="flex justify-center -my-1 relative z-10">
+            <button
+              type="button"
+              onClick={swap}
+              className="bg-emerald-600 hover:bg-emerald-500 active:scale-90 transition text-white p-2.5 rounded-full shadow-lg shadow-emerald-600/30"
+              aria-label="入れ替え"
+            >
+              <ArrowDownUp className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* TO */}
+          <CurrencyRow
+            label="受け取る (TO)"
+            currency={to}
+            onPick={() => setPickerOpen("to")}
+            rightContent={
+              loading ? (
+                <div className="flex-1 text-right">
+                  <Loader2 className="w-5 h-5 animate-spin text-zinc-400 ml-auto inline-block" />
+                </div>
+              ) : error ? (
+                <div className="flex-1 text-right">
+                  <button type="button" onClick={() => fetchRate(from, to)} className="text-red-600 text-sm inline-flex items-center gap-1 hover:text-red-500">
+                    <RefreshCw className="w-4 h-4" /> 再試行
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={
+                      editSide === "to"
+                        ? formatInput(amountTo)
+                        : (net > 0 ? formatInput(String(Number(net.toPrecision(10)))) : "")
+                    }
+                    onFocus={(e) => {
+                      if (editSide !== "to") {
+                        setAmountTo(net > 0 ? String(Number(net.toPrecision(10))) : "");
+                        setEditSide("to");
+                      }
+                      setTimeout(() => e.target.select(), 0);
+                    }}
+                    onChange={e => {
+                      setEditSide("to");
+                      setAmountTo(unformatInput(e.target.value).replace(/[^0-9.]/g, ""));
+                    }}
+                    className={`flex-1 bg-transparent text-right text-2xl font-bold outline-none tabular-nums w-0 min-w-0 ${editSide === "to" ? "text-zinc-900" : "text-emerald-600"}`}
+                    placeholder="0"
+                  />
+                  {((editSide === "to" && amountTo) || (editSide !== "to" && net > 0)) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAmount("");
+                        setAmountTo("");
+                        setEditSide("to");
+                      }}
+                      className="shrink-0 p-1 rounded-full hover:bg-zinc-200 active:bg-zinc-300 transition"
+                      aria-label="クリア"
+                    >
+                      <X className="w-4 h-4 text-zinc-400" />
+                    </button>
+                  )}
+                </>
+              )
+            }
+          />
+
+          {/* 手数料 */}
+          <div className="mt-4 bg-zinc-50 border border-zinc-200 rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] uppercase tracking-widest text-zinc-500">手数料 FEE</span>
+              <span className="text-[11px] text-zinc-500 tabular-nums truncate ml-2">
+                -{fmt(feeAmountDisplay, feeCurrencyObj?.type)} {feeCurrencyObj?.code.toUpperCase()}
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min="0" max="10" step="0.1"
+                value={fee}
+                onChange={e => setFee(e.target.value)}
+                className="flex-1 accent-emerald-600"
+              />
+              <div className="flex items-center bg-zinc-100 rounded-lg px-2 py-1">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={fee}
+                  onChange={e => setFee(e.target.value.replace(/[^0-9.]/g, ""))}
+                  className="bg-transparent w-12 text-right text-sm font-bold outline-none tabular-nums"
+                />
+                <span className="text-zinc-500 text-sm">%</span>
+              </div>
+            </div>
+
+            {/* 手数料の表示通貨トグル */}
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-zinc-200">
+              <span className="text-[10px] uppercase tracking-widest text-zinc-500">表示通貨</span>
+              <div className="flex gap-1 p-0.5 bg-zinc-100 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setFeeCurrency("from")}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center gap-1 transition ${
+                    feeCurrency === "from"
+                      ? "bg-emerald-600 text-white"
+                      : "text-zinc-500 hover:text-zinc-900"
+                  }`}
+                >
+                  {from && <CurrencyIcon code={from.code} type={from.type} size={14} />}
+                  {from?.code.toUpperCase()}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeeCurrency("to")}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center gap-1 transition ${
+                    feeCurrency === "to"
+                      ? "bg-emerald-600 text-white"
+                      : "text-zinc-500 hover:text-zinc-900"
+                  }`}
+                >
+                  {to && <CurrencyIcon code={to.code} type={to.type} size={14} />}
+                  {to?.code.toUpperCase()}
+                </button>
+              </div>
+            </div>
+
+            {/* 計算の内訳:手数料前 → 手数料 → 手数料後 */}
+            {rate && !error && gross > 0 && (
+              <div className="mt-3 pt-3 border-t border-zinc-200 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-zinc-500">手数料前</span>
+                  <span className="tabular-nums text-zinc-700 font-semibold">
+                    {fmt(feeCurrency === "from" ? amt : gross, feeCurrencyObj?.type)} {feeCurrencyObj?.code.toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-zinc-500">手数料 ({feeP}%)</span>
+                  <span className="tabular-nums text-red-600 font-semibold">
+                    -{fmt(feeAmountDisplay, feeCurrencyObj?.type)} {feeCurrencyObj?.code.toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-dashed border-zinc-300">
+                  <span className="text-zinc-500 font-semibold">手数料後</span>
+                  <span className="tabular-nums text-emerald-600 font-bold">
+                    {fmt(feeCurrency === "from" ? amt - feeAmountFrom : net, feeCurrencyObj?.type)} {feeCurrencyObj?.code.toUpperCase()}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex items-center justify-between px-1 text-[11px]">
+            <span className="flex items-center gap-1 text-zinc-500">
+              <TrendingUp className="w-3 h-3" /> レート
+            </span>
+            <span className="tabular-nums text-zinc-700 truncate ml-2">
+              {loading ? "取得中..." : error ? (
+                <span className="text-red-600">{error}</span>
+              ) : rate && from && to ? (
+                <>1 {from.code.toUpperCase()} = <span className="text-emerald-600 font-semibold">{fmt(rate, to.type)}</span> {to.code.toUpperCase()}</>
+              ) : "—"}
+            </span>
+          </div>
+          {rateTimestamp && !loading && !error && (
+            <div className="text-right mt-1 text-[10px] text-zinc-400 tabular-nums">
+              更新: {rateTimestamp.toLocaleTimeString("ja-JP")}
+            </div>
+          )}
+        </div>
+
+        {/* 共有 */}
+        <div className="mt-5 relative">
+          <button
+            type="button"
+            onClick={() => setShareMenu(s => !s)}
+            disabled={!rate}
+            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-200 disabled:text-zinc-500 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
+          >
+            {copied ? <><Check className="w-5 h-5" /> コピーしました</> : <><Share2 className="w-5 h-5" /> 結果を共有</>}
+          </button>
+          {shareMenu && rate && (
+            <div className="absolute bottom-full mb-2 left-0 right-0 bg-white border border-zinc-200 rounded-2xl p-2 shadow-2xl z-20 grid grid-cols-4 gap-2">
+              <button type="button" onClick={() => { doShare(); setShareMenu(false); }} className="flex flex-col items-center gap-1 p-2 hover:bg-zinc-100 rounded-xl">
+                <Share2 className="w-5 h-5" /><span className="text-[10px]">共有</span>
+              </button>
+              <button type="button" onClick={() => { shareX(); setShareMenu(false); }} className="flex flex-col items-center gap-1 p-2 hover:bg-zinc-100 rounded-xl">
+                <span className="w-5 h-5 font-black text-sm flex items-center justify-center">𝕏</span><span className="text-[10px]">X</span>
+              </button>
+              <button type="button" onClick={() => { shareLine(); setShareMenu(false); }} className="flex flex-col items-center gap-1 p-2 hover:bg-zinc-100 rounded-xl">
+                <span className="w-5 h-5 font-black text-[10px] flex items-center justify-center bg-green-500 text-white rounded">LINE</span><span className="text-[10px]">LINE</span>
+              </button>
+              <button type="button" onClick={() => { shareWA(); setShareMenu(false); }} className="flex flex-col items-center gap-1 p-2 hover:bg-zinc-100 rounded-xl">
+                <span className="w-5 h-5 font-black text-[10px] flex items-center justify-center bg-emerald-600 text-white rounded">WA</span><span className="text-[10px]">WhatsApp</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* 履歴 */}
+        {history.length > 0 && (
+          <section className="mt-8">
+            <div className="flex items-center gap-2 mb-3 px-1">
+              <History className="w-4 h-4 text-zinc-500" />
+              <h2 className="text-xs uppercase tracking-widest text-zinc-500 font-semibold">履歴</h2>
+              <span className="ml-auto text-[10px] text-zinc-400">{history.length}件</span>
+              <button type="button" onClick={clearHistory} className="text-[10px] text-zinc-500 hover:text-red-600 underline">消去</button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {history.map(h => {
+                const name = currencies[h.fromCode];
+                const name2 = currencies[h.toCode];
+                if (!name || !name2) return null;
+                const f = { code: h.fromCode, name, type: h.fromType };
+                const t = { code: h.toCode, name: name2, type: h.toType };
+                return (
+                  <button
+                    type="button"
+                    key={`${h.fromCode}-${h.toCode}-${h.ts}`}
+                    onClick={() => { setFrom(f); setTo(t); }}
+                    className="bg-white hover:bg-zinc-50 active:bg-zinc-100 border border-zinc-200 shadow-sm px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition"
+                  >
+                    <CurrencyIcon code={h.fromCode} type={h.fromType} size={16} />
+                    <span className="font-bold">{h.fromCode.toUpperCase()}</span>
+                    <span className="text-zinc-500">→</span>
+                    <CurrencyIcon code={h.toCode} type={h.toType} size={16} />
+                    <span className="font-bold text-emerald-600">{h.toCode.toUpperCase()}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* ピン留め状況の表示&バックアップ */}
+        <section className="mt-8">
+          <div className="flex items-center gap-2 mb-3 px-1">
+            <Pin className="w-4 h-4 text-amber-500 fill-amber-500" />
+            <h2 className="text-xs uppercase tracking-widest text-zinc-500 font-semibold">
+              保存済みデータ
+            </h2>
+          </div>
+          <div className="bg-white border border-zinc-200 rounded-2xl p-4 space-y-2.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500">ピン留め</span>
+              <span className="font-bold text-zinc-900 tabular-nums">{pinned.length} 件</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500">変換履歴</span>
+              <span className="font-bold text-zinc-900 tabular-nums">{history.length} 件</span>
+            </div>
+            {pinned.length > 0 && (
+              <div className="pt-2 border-t border-zinc-100">
+                <div className="text-[10px] uppercase tracking-widest text-zinc-400 mb-1.5">ピン留め中</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {pinned.slice(0, 20).map(code => (
+                    <div key={code} className="flex items-center gap-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg text-[11px]">
+                      <CurrencyIcon
+                        code={code}
+                        type={FIAT_CODES.has(code) ? "fiat" : "crypto"}
+                        size={14}
+                      />
+                      <span className="font-bold">{code.toUpperCase()}</span>
+                      <button
+                        type="button"
+                        onClick={() => togglePin(code)}
+                        className="text-amber-600 hover:text-red-500 ml-0.5"
+                        aria-label="ピン留めを外す"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="pt-2 border-t border-zinc-100 flex gap-2">
+              <button
+                type="button"
+                onClick={exportData}
+                className="flex-1 text-[11px] text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 py-2 rounded-lg font-semibold transition"
+              >
+                📥 バックアップ
+              </button>
+              <button
+                type="button"
+                onClick={importData}
+                className="flex-1 text-[11px] text-cyan-700 hover:text-cyan-800 bg-cyan-50 hover:bg-cyan-100 py-2 rounded-lg font-semibold transition"
+              >
+                📤 復元
+              </button>
+            </div>
+            <div className="text-[10px] text-zinc-400 text-center pt-1">
+              スマホのホーム画面に追加した後もデータは保持されます
+            </div>
+          </div>
+        </section>
+
+        <footer className="mt-10 text-center text-[10px] text-zinc-400 space-y-1">
+          <div>Data: fawazahmed0 Currency API (jsDelivr CDN)</div>
+          <div>Icons: cryptocurrency-icons · 参考値</div>
+          <div className="tabular-nums pt-1">
+            {now.toISOString().replace("T", " ").slice(0, 19)} UTC
+          </div>
+        </footer>
+      </div>
+
+      {pickerOpen && (
+        <CurrencyPicker
+          currencies={currencies}
+          pinned={pinned}
+          togglePin={togglePin}
+          onClose={() => setPickerOpen(null)}
+          onPick={(c) => {
+            if (pickerOpen === "from") setFrom(c); else setTo(c);
+            setPickerOpen(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────
+function CurrencyIcon({ code, type, size = 24 }) {
+  const [failed, setFailed] = useState(false);
+  const lower = code.toLowerCase();
+
+  if (type === "fiat") {
+    // 国旗絵文字
+    const flag = FIAT_FLAGS[lower];
+    if (flag) {
+      return (
+        <span style={{ fontSize: size * 0.9, lineHeight: 1 }} className="inline-flex items-center justify-center">
+          {flag}
+        </span>
+      );
+    }
+    // フォールバック:コード文字
+    return (
+      <div
+        className="rounded-full bg-cyan-100 text-cyan-700 flex items-center justify-center font-bold"
+        style={{ width: size, height: size, fontSize: size * 0.4 }}
+      >
+        {code.slice(0, 2).toUpperCase()}
+      </div>
+    );
+  }
+
+  // 仮想通貨:cryptocurrency-icons の SVG
+  if (!failed) {
+    return (
+      <img
+        src={coinIconUrl(lower)}
+        alt={code}
+        width={size}
+        height={size}
+        className="rounded-full"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <div
+      className="rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold"
+      style={{ width: size, height: size, fontSize: size * 0.35 }}
+    >
+      {code.slice(0, 3).toUpperCase()}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────
+function CurrencyRow({ label, currency, onPick, rightContent }) {
+  if (!currency) return null;
+  const displayName = JP_NAMES[currency.code] || currency.name;
+  return (
+    <div className="mb-2">
+      <div className="flex items-center justify-between mb-2 px-1">
+        <span className="text-[10px] uppercase tracking-widest text-zinc-500">{label}</span>
+        <span className={`text-[10px] ${currency.type === "crypto" ? "text-emerald-600" : "text-cyan-600"}`}>
+          ● {currency.type === "crypto" ? "CRYPTO" : "FIAT"}
+        </span>
+      </div>
+      <div className="bg-zinc-50 border border-zinc-200 rounded-2xl p-4 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onPick}
+          className="flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-300 text-zinc-900 px-2.5 py-2 rounded-xl transition shrink-0"
+        >
+          <CurrencyIcon code={currency.code} type={currency.type} size={22} />
+          <span className="font-bold text-sm">{currency.code.toUpperCase()}</span>
+          <span className="text-zinc-500 text-xs">▾</span>
+        </button>
+        {rightContent}
+      </div>
+      <div className="text-right mt-1 px-1 text-[11px] text-zinc-500 truncate">{displayName}</div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────
+function CurrencyPicker({ currencies, pinned = [], togglePin, onClose, onPick }) {
+  const [q, setQ] = useState("");
+  const [tab, setTab] = useState("all");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => inputRef.current?.focus(), 150);
+    return () => clearTimeout(t);
+  }, []);
+
+  const pinnedSet = useMemo(() => new Set(pinned), [pinned]);
+  // ピン留めした順番を保持したMap
+  const pinnedOrder = useMemo(() => {
+    const m = new Map();
+    pinned.forEach((code, i) => m.set(code, i));
+    return m;
+  }, [pinned]);
+
+  // 全通貨を配列化
+  const allItems = useMemo(() => {
+    const items = Object.entries(currencies).map(([code, name]) => ({
+      code,
+      name,
+      jpName: JP_NAMES[code],
+      type: FIAT_CODES.has(code) ? "fiat" : "crypto",
+    }));
+    // ソート優先順位: 1.ピン留め(登録順) 2.PRIORITY 3.アルファベット
+    items.sort((a, b) => {
+      const ap = pinnedOrder.has(a.code);
+      const bp = pinnedOrder.has(b.code);
+      if (ap && bp) return pinnedOrder.get(a.code) - pinnedOrder.get(b.code);
+      if (ap) return -1;
+      if (bp) return 1;
+      const ai = PRIORITY.indexOf(a.code);
+      const bi = PRIORITY.indexOf(b.code);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.code.localeCompare(b.code);
+    });
+    return items;
+  }, [currencies, pinnedOrder]);
+
+  const fiats = useMemo(() => allItems.filter(x => x.type === "fiat"), [allItems]);
+  const cryptos = useMemo(() => allItems.filter(x => x.type === "crypto"), [allItems]);
+
+  const pool = tab === "fiat" ? fiats : tab === "crypto" ? cryptos : allItems;
+  const query = q.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!query) return pool.slice(0, 300);
+    return pool.filter(c =>
+      c.code.includes(query) ||
+      (c.name || "").toLowerCase().includes(query) ||
+      (c.jpName || "").toLowerCase().includes(query)
+    ).slice(0, 300);
+  }, [pool, query]);
+
+  // ピン留めセクションとその他で区切って表示するための分割
+  const pinnedItems = filtered.filter(c => pinnedSet.has(c.code));
+  const otherItems = filtered.filter(c => !pinnedSet.has(c.code));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-900/40 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="bg-white border-t border-zinc-200 rounded-t-3xl shadow-2xl w-full max-w-md flex flex-col"
+        style={{ height: "90vh" }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="p-4 border-b border-zinc-800 shrink-0">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-bold">通貨を選択 <span className="text-xs text-zinc-500 font-normal">({allItems.length}種)</span></h3>
+            <button type="button" onClick={onClose} className="text-zinc-500 hover:text-zinc-900 p-1">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 bg-zinc-50 rounded-xl px-3 py-3 border border-zinc-200 focus-within:border-emerald-600 transition mb-3">
+            <Search className="w-5 h-5 text-emerald-600" />
+            <input
+              ref={inputRef}
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="BTC, ビットコイン, 円, yen..."
+              className="flex-1 bg-transparent outline-none text-base"
+              autoComplete="off"
+            />
+            {q && (
+              <button type="button" onClick={() => setQ("")} className="text-zinc-500 hover:text-zinc-900">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex gap-1 p-1 bg-zinc-100 rounded-xl">
+            <TabBtn active={tab === "all"}    onClick={() => setTab("all")}>すべて ({allItems.length})</TabBtn>
+            <TabBtn active={tab === "crypto"} onClick={() => setTab("crypto")}>仮想 ({cryptos.length})</TabBtn>
+            <TabBtn active={tab === "fiat"}   onClick={() => setTab("fiat")}>法定 ({fiats.length})</TabBtn>
+          </div>
+
+          {pinned.length > 0 && !query && (
+            <div className="mt-2 text-[10px] text-zinc-500 flex items-center gap-1">
+              <Pin className="w-3 h-3 text-amber-500 fill-amber-500" />
+              ピン留め {pinned.length}件 を上位表示中
+            </div>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <div className="text-center text-zinc-500 py-8 text-sm">
+              「{q}」に一致する通貨がありません
+            </div>
+          ) : (
+            <>
+              {/* ピン留めセクション */}
+              {pinnedItems.length > 0 && (
+                <>
+                  <div className="px-4 py-2 bg-amber-50/70 border-b border-amber-100 text-[10px] uppercase tracking-widest text-amber-700 font-bold flex items-center gap-1.5">
+                    <Pin className="w-3 h-3 fill-amber-600 text-amber-600" />
+                    ピン留め
+                  </div>
+                  {pinnedItems.map(c => (
+                    <PickerItem
+                      key={`pin-${c.code}`}
+                      item={c}
+                      pinned={true}
+                      onPick={onPick}
+                      onTogglePin={togglePin}
+                    />
+                  ))}
+                </>
+              )}
+
+              {/* その他セクション */}
+              {otherItems.length > 0 && (
+                <>
+                  {pinnedItems.length > 0 && (
+                    <div className="px-4 py-2 bg-zinc-50 border-b border-zinc-100 text-[10px] uppercase tracking-widest text-zinc-500 font-bold">
+                      すべての通貨
+                    </div>
+                  )}
+                  {otherItems.map(c => (
+                    <PickerItem
+                      key={c.code}
+                      item={c}
+                      pinned={false}
+                      onPick={onPick}
+                      onTogglePin={togglePin}
+                    />
+                  ))}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ピッカーの各行コンポーネント
+function PickerItem({ item: c, pinned, onPick, onTogglePin }) {
+  const jp = JP_NAMES[c.code];
+  const sym = SYMBOLS[c.code];
+  return (
+    <div className={`flex items-center border-b border-zinc-100 transition ${pinned ? "bg-amber-50/30" : "hover:bg-zinc-50"}`}>
+      <button
+        type="button"
+        onClick={() => onPick(c)}
+        className="flex-1 px-4 py-3 flex items-center gap-3 text-left min-w-0 active:bg-zinc-100"
+      >
+        <div className="shrink-0">
+          <CurrencyIcon code={c.code} type={c.type} size={32} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-sm">{c.code.toUpperCase()}</span>
+            {sym && <span className="text-xs text-zinc-500">{sym}</span>}
+            <span className={`text-[9px] px-1.5 py-0.5 rounded ${c.type === "crypto" ? "bg-emerald-100 text-emerald-700" : "bg-cyan-100 text-cyan-700"}`}>
+              {c.type === "crypto" ? "CRYPTO" : "FIAT"}
+            </span>
+          </div>
+          <div className="text-xs text-zinc-500 truncate mt-0.5">
+            {jp || c.name}
+            {jp && c.name && jp !== c.name ? <span className="text-zinc-400"> · {c.name}</span> : null}
+          </div>
+        </div>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onTogglePin(c.code); }}
+        className={`shrink-0 p-3 mr-1 rounded-full transition ${
+          pinned
+            ? "text-amber-500 hover:bg-amber-100"
+            : "text-zinc-300 hover:text-amber-500 hover:bg-amber-50"
+        }`}
+        aria-label={pinned ? "ピン留めを外す" : "ピン留め"}
+      >
+        <Pin className={`w-5 h-5 ${pinned ? "fill-amber-500" : ""}`} />
+      </button>
+    </div>
+  );
+}
+
+function TabBtn({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex-1 py-2 rounded-lg text-xs font-semibold transition ${active ? "bg-emerald-600 text-white" : "text-zinc-500 hover:text-zinc-900"}`}
+    >
+      {children}
+    </button>
+  );
+}
