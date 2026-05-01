@@ -653,6 +653,21 @@ export default function CryptoConverter() {
   // カンマを除去して数値文字列にする
   const unformatInput = (s) => (s || "").replace(/,/g, "");
 
+  // 通貨に応じた桁数で数値を丸めて文字列化(入力欄表示用)
+  // 仮想通貨は最大8桁(末尾0除去)、法定は通貨別桁数
+  const roundForCurrency = (n, type, code) => {
+    if (!isFinite(n) || n === null || n === undefined || n === 0) return "";
+    if (type === "crypto") {
+      // 仮想通貨は最大8桁、末尾の0を除去
+      return String(Number(n.toFixed(8))).replace(/\.?0+$/, "");
+    }
+    // 法定通貨は通貨ごとの桁数
+    const decimals = code ? getDecimals(code, type) : 2;
+    const fixed = n.toFixed(decimals);
+    // 末尾が0だけの場合は除去せず、桁数に従う
+    return fixed;
+  };
+
   const shareText = () => {
     if (!from || !to) return "";
     const dt = now.toLocaleString("ja-JP");
@@ -772,11 +787,11 @@ export default function CryptoConverter() {
                       ? formatInput(amount)
                       : (editSide === "from"
                         ? formatInput(amount)
-                        : (amt > 0 ? formatInput(String(Number(amt.toPrecision(10)))) : ""))
+                        : (amt > 0 ? formatInput(roundForCurrency(amt, from?.type, from?.code)) : ""))
                   }
                   onFocus={(e) => {
                     if (mode === "calc" && editSide !== "from") {
-                      setAmount(amt > 0 ? String(Number(amt.toPrecision(10))) : "");
+                      setAmount(amt > 0 ? roundForCurrency(amt, from?.type, from?.code) : "");
                       setEditSide("from");
                     }
                     setTimeout(() => e.target.select(), 0);
@@ -843,11 +858,11 @@ export default function CryptoConverter() {
                         ? formatInput(amountTo)
                         : (editSide === "to"
                           ? formatInput(amountTo)
-                          : (net > 0 ? formatInput(String(Number(net.toPrecision(10)))) : ""))
+                          : (net > 0 ? formatInput(roundForCurrency(net, to?.type, to?.code)) : ""))
                     }
                     onFocus={(e) => {
                       if (mode === "calc" && editSide !== "to") {
-                        setAmountTo(net > 0 ? String(Number(net.toPrecision(10))) : "");
+                        setAmountTo(net > 0 ? roundForCurrency(net, to?.type, to?.code) : "");
                         setEditSide("to");
                       }
                       setTimeout(() => e.target.select(), 0);
