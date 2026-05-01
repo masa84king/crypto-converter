@@ -106,23 +106,31 @@ const PRIORITY = ["jpy", "usd", "eur", "gbp", "cny", "krw", "btc", "eth", "usdt"
 const FIAT_CODES = new Set(["aed","afn","all","amd","ang","aoa","ars","aud","awg","azn","bam","bbd","bdt","bgn","bhd","bif","bmd","bnd","bob","brl","bsd","btn","bwp","byn","bzd","cad","cdf","chf","clp","cny","cop","crc","cup","cve","czk","djf","dkk","dop","dzd","egp","ern","etb","eur","fjd","fkp","fok","gbp","gel","ggp","ghs","gip","gmd","gnf","gtq","gyd","hkd","hnl","hrk","htg","huf","idr","ils","imp","inr","iqd","irr","isk","jep","jmd","jod","jpy","kes","kgs","khr","kid","kmf","krw","kwd","kyd","kzt","lak","lbp","lkr","lrd","lsl","lyd","mad","mdl","mga","mkd","mmk","mnt","mop","mru","mur","mvr","mwk","mxn","myr","mzn","nad","ngn","nio","nok","npr","nzd","omr","pab","pen","pgk","php","pkr","pln","pyg","qar","ron","rsd","rub","rwf","sar","sbd","scr","sdg","sek","sgd","shp","sle","sll","sos","srd","ssp","stn","syp","szl","thb","tjs","tmt","tnd","top","try","ttd","tvd","twd","tzs","uah","ugx","usd","uyu","uzs","ves","vnd","vuv","wst","xaf","xcd","xdr","xof","xpf","yer","zar","zmw","zwl"]);
 
 // ─────────────────────────────────────────
-// 通貨ごとの小数点以下の桁数(ISO 4217 + 慣習)
-//   ・3桁 = ディナール系(クウェート・バーレーン等)
-//   ・0桁 = 円・韓国ウォン・ベトナムドンなど(下位単位がない通貨)
-//   ・2桁 = 一般的な法定通貨(USD・EUR等)
-//   ・記載なし = デフォルト2桁
+// 通貨ごとの小数点以下の桁数
+// 仕様:為替市場標準(B方式)
+//   ・基本すべて2桁(JPY、KRW、VND等も含む)
+//   ・ディナール系のみ3桁(国際標準)
+//   ・仮想通貨は最大8桁(末尾0自動除去)
+//
+// 例:
+//   1 USD = 157.28 JPY  (円も2桁)
+//   1 USD = 0.92 EUR
+//   1 USD = 0.377 BHD   (ディナールは3桁)
+//   1 USD = 1,400.50 KRW (ウォンも2桁)
 // ─────────────────────────────────────────
 const CURRENCY_DECIMALS = {
-  // 0桁(下位単位がない/普段使わない)
-  jpy: 0, krw: 0, vnd: 0, idr: 0, clp: 0, isk: 0, huf: 0,
-  pyg: 0, rwf: 0, ugx: 0, xaf: 0, xof: 0, xpf: 0, kmf: 0,
-  bif: 0, djf: 0, gnf: 0, vuv: 0, mga: 0,
-  // 3桁(ディナール系)
-  bhd: 3, iqd: 3, jod: 3, kwd: 3, lyd: 3, omr: 3, tnd: 3,
-  // 4桁(超低額)
-  clf: 4,
-  // 仮想通貨(デフォルト)
-  // ここは type === "crypto" で別処理
+  // 3桁(ディナール系・ISO 4217 厳密準拠)
+  bhd: 3, // バーレーンディナール
+  iqd: 3, // イラクディナール
+  jod: 3, // ヨルダンディナール
+  kwd: 3, // クウェートディナール
+  lyd: 3, // リビアディナール
+  omr: 3, // オマーンリアル
+  tnd: 3, // チュニジアディナール
+  // 4桁(超低額計算単位)
+  clf: 4, // UFチリ
+  // 上記以外はすべてデフォルトの2桁(JPY・KRW・VND・USD・EURなど)
+  // 仮想通貨は type === "crypto" で別処理(最大8桁・末尾0除去)
 };
 
 // 通貨に応じた桁数を取得(小文字code想定)
@@ -668,6 +676,62 @@ export default function CryptoConverter() {
     return fixed;
   };
 
+  // 文字数に応じてフォントサイズクラスを返す
+  // 入力欄の数字が長くなった時に自動縮小
+  const getNumberSize = (s) => {
+    if (!s) return "text-2xl";
+    const len = s.length;
+    if (len <= 9) return "text-2xl";   // 12,345.67 など
+    if (len <= 13) return "text-xl";   // 1,234,567,890.50 まで
+    if (len <= 17) return "text-lg";   // 12,345,678,900,123 まで
+    if (len <= 21) return "text-base"; // それより大きい
+    return "text-sm";                  // 超巨大数値
+  };
+
+  // 補助表示用の単位略記
+  // ・JPY(円)→ 万・億・兆 の日本式
+  // ・他通貨   → K/M/B/T の国際略記
+  // ・仮想通貨 → 補助表示なし
+  // ・1万未満(または1K未満)→ 補助表示なし
+  const formatUnitAbbreviation = (n, type, code) => {
+    if (type === "crypto") return null; // 仮想通貨は対象外
+    if (!isFinite(n) || n === null || n === 0) return null;
+    const abs = Math.abs(n);
+
+    // ─── 円(JPY)の場合:日本式の万・億・兆 ───
+    if ((code || "").toLowerCase() === "jpy") {
+      if (abs < 10000) return null;
+      if (abs < 100000000) {
+        return (n / 10000).toLocaleString("ja-JP", { maximumFractionDigits: 2 }) + "万円";
+      }
+      if (abs < 1000000000000) {
+        return (n / 100000000).toLocaleString("ja-JP", { maximumFractionDigits: 2 }) + "億円";
+      }
+      if (abs < 10000000000000000) {
+        return (n / 1000000000000).toLocaleString("ja-JP", { maximumFractionDigits: 2 }) + "兆円";
+      }
+      // 京単位(超巨大)
+      return (n / 10000000000000000).toLocaleString("ja-JP", { maximumFractionDigits: 2 }) + "京円";
+    }
+
+    // ─── その他の通貨:K/M/B/T 略記 ───
+    if (abs < 1000) return null; // 1,000未満は略記不要
+    const upper = (code || "").toUpperCase();
+    if (abs < 1000000) {
+      return (n / 1000).toLocaleString("en-US", { maximumFractionDigits: 2 }) + "K " + upper;
+    }
+    if (abs < 1000000000) {
+      return (n / 1000000).toLocaleString("en-US", { maximumFractionDigits: 2 }) + "M " + upper;
+    }
+    if (abs < 1000000000000) {
+      return (n / 1000000000).toLocaleString("en-US", { maximumFractionDigits: 2 }) + "B " + upper;
+    }
+    return (n / 1000000000000).toLocaleString("en-US", { maximumFractionDigits: 2 }) + "T " + upper;
+  };
+
+  // 旧名互換(将来的な参照のため)
+  const formatJapaneseUnit = (n, type) => formatUnitAbbreviation(n, type, "jpy");
+
   const shareText = () => {
     if (!from || !to) return "";
     const dt = now.toLocaleString("ja-JP");
@@ -777,6 +841,7 @@ export default function CryptoConverter() {
             label="支払う (FROM)"
             currency={from}
             onPick={() => setPickerOpen("from")}
+            unitLabel={amt > 0 ? formatUnitAbbreviation(amt, from?.type, from?.code) : null}
             rightContent={
               <>
                 <input
@@ -800,7 +865,7 @@ export default function CryptoConverter() {
                     if (mode === "calc") setEditSide("from");
                     setAmount(unformatInput(e.target.value).replace(/[^0-9.]/g, ""));
                   }}
-                  className={`flex-1 bg-transparent text-right text-2xl font-bold outline-none tabular-nums w-0 min-w-0 ${mode === "reverse" || editSide === "from" ? "text-zinc-900" : "text-emerald-600"}`}
+                  className={`flex-1 bg-transparent text-right ${getNumberSize(mode === "reverse" || editSide === "from" ? formatInput(amount) : formatInput(roundForCurrency(amt, from?.type, from?.code)))} font-bold outline-none tabular-nums w-0 min-w-0 ${mode === "reverse" || editSide === "from" ? "text-zinc-900" : "text-emerald-600"}`}
                   placeholder="0"
                 />
                 {((editSide === "from" && amount) || (editSide !== "from" && amt > 0)) && (
@@ -837,6 +902,7 @@ export default function CryptoConverter() {
             label="受け取る (TO)"
             currency={to}
             onPick={() => setPickerOpen("to")}
+            unitLabel={net > 0 ? formatUnitAbbreviation(net, to?.type, to?.code) : null}
             rightContent={
               loading ? (
                 <div className="flex-1 text-right">
@@ -871,7 +937,7 @@ export default function CryptoConverter() {
                       if (mode === "calc") setEditSide("to");
                       setAmountTo(unformatInput(e.target.value).replace(/[^0-9.]/g, ""));
                     }}
-                    className={`flex-1 bg-transparent text-right text-2xl font-bold outline-none tabular-nums w-0 min-w-0 ${mode === "reverse" || editSide === "to" ? "text-zinc-900" : "text-emerald-600"}`}
+                    className={`flex-1 bg-transparent text-right ${getNumberSize(mode === "reverse" || editSide === "to" ? formatInput(amountTo) : formatInput(roundForCurrency(net, to?.type, to?.code)))} font-bold outline-none tabular-nums w-0 min-w-0 ${mode === "reverse" || editSide === "to" ? "text-zinc-900" : "text-emerald-600"}`}
                     placeholder="0"
                   />
                   {((editSide === "to" && amountTo) || (editSide !== "to" && net > 0)) && (
@@ -1352,7 +1418,7 @@ function CurrencyIcon({ code, type, size = 24 }) {
 }
 
 // ─────────────────────────────────────────
-function CurrencyRow({ label, currency, onPick, rightContent }) {
+function CurrencyRow({ label, currency, onPick, rightContent, unitLabel }) {
   if (!currency) return null;
   const displayName = JP_NAMES[currency.code] || currency.name;
   return (
@@ -1375,7 +1441,13 @@ function CurrencyRow({ label, currency, onPick, rightContent }) {
         </button>
         {rightContent}
       </div>
-      <div className="text-right mt-1 px-1 text-[11px] text-zinc-500 truncate">{displayName}</div>
+      <div className="flex items-center justify-between mt-1 px-1 text-[11px]">
+        {/* 日本式単位の補助表記(万・億・兆) */}
+        {unitLabel ? (
+          <span className="text-emerald-600 font-semibold tabular-nums">≈ {unitLabel}</span>
+        ) : <span></span>}
+        <span className="text-zinc-500 truncate ml-2">{displayName}</span>
+      </div>
     </div>
   );
 }
