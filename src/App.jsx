@@ -11,6 +11,77 @@ import { ArrowDownUp, Search, X, Share2, Clock, History, Check, RefreshCw, Trend
 const API_PRIMARY  = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1";
 const API_FALLBACK = "https://latest.currency-api.pages.dev/v1";
 
+// ─────────────────────────────────────────
+// CoinGecko API(仮想通貨のリアルタイムレート用)
+//   ・5分ごとにキャッシュ更新
+//   ・無料・APIキー不要
+//   ・主要な仮想通貨をカバー
+// ─────────────────────────────────────────
+const COINGECKO_API = "https://api.coingecko.com/api/v3";
+
+// 通貨コード → CoinGecko ID のマッピング
+// (CoinGeckoは独自のIDを使うため、変換が必要)
+const COINGECKO_IDS = {
+  btc: "bitcoin",
+  eth: "ethereum",
+  usdt: "tether",
+  usdc: "usd-coin",
+  bnb: "binancecoin",
+  xrp: "ripple",
+  ada: "cardano",
+  sol: "solana",
+  doge: "dogecoin",
+  dot: "polkadot",
+  matic: "matic-network",
+  ltc: "litecoin",
+  trx: "tron",
+  shib: "shiba-inu",
+  avax: "avalanche-2",
+  link: "chainlink",
+  atom: "cosmos",
+  uni: "uniswap",
+  xlm: "stellar",
+  near: "near",
+  algo: "algorand",
+  vet: "vechain",
+  fil: "filecoin",
+  icp: "internet-computer",
+  hbar: "hedera-hashgraph",
+  apt: "aptos",
+  arb: "arbitrum",
+  op: "optimism",
+  mkr: "maker",
+  inj: "injective-protocol",
+  aave: "aave",
+  pepe: "pepe",
+  bch: "bitcoin-cash",
+  etc: "ethereum-classic",
+  ftm: "fantom",
+  sand: "the-sandbox",
+  mana: "decentraland",
+  xmr: "monero",
+  flow: "flow",
+  egld: "elrond-erd-2",
+  theta: "theta-token",
+  axs: "axie-infinity",
+  cake: "pancakeswap-token",
+  rune: "thorchain",
+  kas: "kaspa",
+  sui: "sui",
+  tia: "celestia",
+  sei: "sei-network",
+  jto: "jito-governance-token",
+  jup: "jupiter-exchange-solana",
+};
+
+// CoinGeckoでサポートされる法定通貨(vs_currencies)
+const COINGECKO_FIATS = new Set([
+  "usd", "eur", "jpy", "gbp", "aud", "cad", "chf", "cny", "hkd",
+  "krw", "sgd", "twd", "thb", "idr", "inr", "rub", "brl", "mxn",
+  "zar", "try", "nzd", "sek", "nok", "dkk", "pln", "huf", "czk",
+  "ils", "php", "myr", "vnd", "ars", "clp", "aed", "sar",
+]);
+
 // 通貨コード → 国旗/アイコン情報
 // 主要法定通貨の国コード(国旗絵文字用)
 const FIAT_FLAGS = {
@@ -83,6 +154,47 @@ async function fetchJson(path) {
   return await r2.json();
 }
 
+// CoinGeckoから仮想通貨の価格を取得(5分単位の最新データ)
+async function fetchCoingeckoPrice(cryptoCode, fiatCode) {
+  const id = COINGECKO_IDS[cryptoCode.toLowerCase()];
+  if (!id) return null;
+
+  const fiat = fiatCode.toLowerCase();
+  if (!COINGECKO_FIATS.has(fiat)) return null;
+
+  try {
+    const url = `${COINGECKO_API}/simple/price?ids=${id}&vs_currencies=${fiat}`;
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const data = await r.json();
+    const price = data?.[id]?.[fiat];
+    return (price && isFinite(price) && price > 0) ? price : null;
+  } catch {
+    return null;
+  }
+}
+
+// CoinGeckoで両側が仮想通貨の場合(BTC→ETHなど)
+async function fetchCoingeckoCryptoToCrypto(fromCode, toCode) {
+  const fromId = COINGECKO_IDS[fromCode.toLowerCase()];
+  const toId = COINGECKO_IDS[toCode.toLowerCase()];
+  if (!fromId || !toId) return null;
+
+  try {
+    // どちらもUSD建てで取得して比率を計算
+    const url = `${COINGECKO_API}/simple/price?ids=${fromId},${toId}&vs_currencies=usd`;
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const data = await r.json();
+    const fromUsd = data?.[fromId]?.usd;
+    const toUsd = data?.[toId]?.usd;
+    if (!fromUsd || !toUsd) return null;
+    return fromUsd / toUsd;
+  } catch {
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────
 export default function CryptoConverter() {
   const [now, setNow] = useState(new Date());
@@ -95,7 +207,9 @@ export default function CryptoConverter() {
   const [feeCurrency, setFeeCurrency] = useState("to"); // "from" | "to"
   const [mode, setMode] = useState("calc"); // "calc"=自動計算 / "reverse"=手数料逆算
   const [rate, setRate] = useState(null);
+  const [prevRate, setPrevRate] = useState(null); // 前回のレート(変動表示用)
   const [rateTimestamp, setRateTimestamp] = useState(null);
+  const [rateSource, setRateSource] = useState(null); // "coingecko" | "fawazahmed0"
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(null);
@@ -193,37 +307,95 @@ export default function CryptoConverter() {
     })();
   }, []);
 
-  // レート取得(from→to)
-  const fetchRate = useCallback(async (f, t) => {
+  // レート取得(ハイブリッド方式)
+  // 仮想通貨が絡む場合 → CoinGecko(5分単位の最新)
+  // 法定通貨同士     → fawazahmed0(日次)
+  const fetchRate = useCallback(async (f, t, isAutoRefresh = false) => {
     if (!f || !t) return;
     if (f.code === t.code) {
       setRate(1);
       setRateTimestamp(new Date());
+      setRateSource(null);
       setError(null);
       return;
     }
-    setLoading(true);
+
+    // 自動更新の場合はローディング表示しない(チラつき防止)
+    if (!isAutoRefresh) setLoading(true);
     setError(null);
+
     try {
-      const data = await fetchJson(`/currencies/${f.code}.min.json`);
-      // レスポンス: { date: "...", <f.code>: { <target>: rate, ... } }
-      const rateMap = data[f.code];
-      const r = rateMap?.[t.code];
-      if (!r || !isFinite(r) || r <= 0) throw new Error("レート取得失敗");
-      setRate(r);
+      let newRate = null;
+      let source = null;
+
+      // ケース1:仮想通貨 → 法定通貨(BTC → JPY 等)
+      if (f.type === "crypto" && t.type === "fiat") {
+        newRate = await fetchCoingeckoPrice(f.code, t.code);
+        if (newRate) source = "coingecko";
+      }
+      // ケース2:法定通貨 → 仮想通貨(JPY → BTC 等)
+      else if (f.type === "fiat" && t.type === "crypto") {
+        const inverse = await fetchCoingeckoPrice(t.code, f.code);
+        if (inverse && inverse > 0) {
+          newRate = 1 / inverse;
+          source = "coingecko";
+        }
+      }
+      // ケース3:仮想通貨 → 仮想通貨(BTC → ETH 等)
+      else if (f.type === "crypto" && t.type === "crypto") {
+        newRate = await fetchCoingeckoCryptoToCrypto(f.code, t.code);
+        if (newRate) source = "coingecko";
+      }
+
+      // CoinGeckoで取得できなかった場合、fawazahmed0にフォールバック
+      if (!newRate) {
+        const data = await fetchJson(`/currencies/${f.code}.min.json`);
+        const rateMap = data[f.code];
+        const r = rateMap?.[t.code];
+        if (!r || !isFinite(r) || r <= 0) throw new Error("レート取得失敗");
+        newRate = r;
+        source = "fawazahmed0";
+      }
+
+      // 前回のレートを保存(変動矢印表示用)
+      setPrevRate(prev => {
+        // 同じ通貨ペアの場合のみ前回値を保持
+        return rate;
+      });
+      setRate(newRate);
       setRateTimestamp(new Date());
+      setRateSource(source);
     } catch (e) {
       setError(e.message || "通信エラー");
-      setRate(null);
+      if (!isAutoRefresh) setRate(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [rate]);
 
   useEffect(() => {
     if (!from || !to) return;
-    const timer = setTimeout(() => fetchRate(from, to), 400);
+    // 通貨ペアが変わったら、prevRateをリセット
+    setPrevRate(null);
+    const timer = setTimeout(() => fetchRate(from, to, false), 400);
     return () => clearTimeout(timer);
+  }, [from, to]);
+
+  // 自動更新:5分ごとに最新レートを取得(同じ通貨ペアの場合のみ)
+  useEffect(() => {
+    if (!from || !to) return;
+    if (from.code === to.code) return;
+
+    // 仮想通貨絡みなら5分、法定のみなら30分(fawazahmedは日次更新なので無駄打ちしない)
+    const intervalMs = (from.type === "crypto" || to.type === "crypto")
+      ? 5 * 60 * 1000   // 5分
+      : 30 * 60 * 1000; // 30分
+
+    const interval = setInterval(() => {
+      fetchRate(from, to, true);
+    }, intervalMs);
+
+    return () => clearInterval(interval);
   }, [from, to, fetchRate]);
 
   // 履歴保存
@@ -723,17 +895,51 @@ export default function CryptoConverter() {
             <span className="flex items-center gap-1 text-zinc-500">
               <TrendingUp className="w-3 h-3" /> レート
             </span>
-            <span className="tabular-nums text-zinc-700 truncate ml-2">
+            <span className="tabular-nums text-zinc-700 truncate ml-2 flex items-center gap-1">
               {loading ? "取得中..." : error ? (
                 <span className="text-red-600">{error}</span>
               ) : rate && from && to ? (
-                <>1 {from.code.toUpperCase()} = <span className="text-emerald-600 font-semibold">{fmt(rate, to.type)}</span> {to.code.toUpperCase()}</>
+                <>
+                  1 {from.code.toUpperCase()} = <span className="text-emerald-600 font-semibold">{fmt(rate, to.type)}</span> {to.code.toUpperCase()}
+                  {/* 変動矢印(前回レートとの比較) */}
+                  {prevRate && prevRate !== rate && (
+                    <span className={`ml-1 text-[10px] font-bold ${rate > prevRate ? "text-emerald-600" : "text-red-500"}`}>
+                      {rate > prevRate ? "▲" : "▼"}
+                      {Math.abs(((rate - prevRate) / prevRate) * 100).toFixed(2)}%
+                    </span>
+                  )}
+                </>
               ) : "—"}
             </span>
           </div>
           {rateTimestamp && !loading && !error && (
-            <div className="text-right mt-1 text-[10px] text-zinc-400 tabular-nums">
-              更新: {rateTimestamp.toLocaleTimeString("ja-JP")}
+            <div className="flex items-center justify-between mt-1 px-1 text-[10px] text-zinc-400 tabular-nums">
+              <span className="flex items-center gap-1.5">
+                {/* データソースバッジ */}
+                {rateSource === "coingecko" && (
+                  <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-semibold border border-emerald-200">
+                    🔴 LIVE
+                  </span>
+                )}
+                {rateSource === "fawazahmed0" && (
+                  <span className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-semibold border border-zinc-200">
+                    日次
+                  </span>
+                )}
+              </span>
+              <span className="flex items-center gap-2">
+                <span>更新: {rateTimestamp.toLocaleTimeString("ja-JP")}</span>
+                <button
+                  type="button"
+                  onClick={() => fetchRate(from, to, false)}
+                  disabled={loading}
+                  className="text-emerald-600 hover:text-emerald-700 disabled:opacity-50 transition"
+                  aria-label="今すぐ更新"
+                  title="今すぐ更新"
+                >
+                  <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+                </button>
+              </span>
             </div>
           )}
         </div>
