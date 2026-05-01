@@ -105,6 +105,33 @@ const PRIORITY = ["jpy", "usd", "eur", "gbp", "cny", "krw", "btc", "eth", "usdt"
 // 既知の法定通貨コード(ISO 4217) - これ以外はすべて仮想通貨扱い
 const FIAT_CODES = new Set(["aed","afn","all","amd","ang","aoa","ars","aud","awg","azn","bam","bbd","bdt","bgn","bhd","bif","bmd","bnd","bob","brl","bsd","btn","bwp","byn","bzd","cad","cdf","chf","clp","cny","cop","crc","cup","cve","czk","djf","dkk","dop","dzd","egp","ern","etb","eur","fjd","fkp","fok","gbp","gel","ggp","ghs","gip","gmd","gnf","gtq","gyd","hkd","hnl","hrk","htg","huf","idr","ils","imp","inr","iqd","irr","isk","jep","jmd","jod","jpy","kes","kgs","khr","kid","kmf","krw","kwd","kyd","kzt","lak","lbp","lkr","lrd","lsl","lyd","mad","mdl","mga","mkd","mmk","mnt","mop","mru","mur","mvr","mwk","mxn","myr","mzn","nad","ngn","nio","nok","npr","nzd","omr","pab","pen","pgk","php","pkr","pln","pyg","qar","ron","rsd","rub","rwf","sar","sbd","scr","sdg","sek","sgd","shp","sle","sll","sos","srd","ssp","stn","syp","szl","thb","tjs","tmt","tnd","top","try","ttd","tvd","twd","tzs","uah","ugx","usd","uyu","uzs","ves","vnd","vuv","wst","xaf","xcd","xdr","xof","xpf","yer","zar","zmw","zwl"]);
 
+// ─────────────────────────────────────────
+// 通貨ごとの小数点以下の桁数(ISO 4217 + 慣習)
+//   ・3桁 = ディナール系(クウェート・バーレーン等)
+//   ・0桁 = 円・韓国ウォン・ベトナムドンなど(下位単位がない通貨)
+//   ・2桁 = 一般的な法定通貨(USD・EUR等)
+//   ・記載なし = デフォルト2桁
+// ─────────────────────────────────────────
+const CURRENCY_DECIMALS = {
+  // 0桁(下位単位がない/普段使わない)
+  jpy: 0, krw: 0, vnd: 0, idr: 0, clp: 0, isk: 0, huf: 0,
+  pyg: 0, rwf: 0, ugx: 0, xaf: 0, xof: 0, xpf: 0, kmf: 0,
+  bif: 0, djf: 0, gnf: 0, vuv: 0, mga: 0,
+  // 3桁(ディナール系)
+  bhd: 3, iqd: 3, jod: 3, kwd: 3, lyd: 3, omr: 3, tnd: 3,
+  // 4桁(超低額)
+  clf: 4,
+  // 仮想通貨(デフォルト)
+  // ここは type === "crypto" で別処理
+};
+
+// 通貨に応じた桁数を取得(小文字code想定)
+function getDecimals(code, type) {
+  if (type === "crypto") return null; // crypto は別ロジック
+  const c = (code || "").toLowerCase();
+  return CURRENCY_DECIMALS[c] ?? 2; // デフォルト2桁
+}
+
 // 通貨記号
 const SYMBOLS = {
   jpy: "¥", usd: "$", eur: "€", gbp: "£", cny: "¥", krw: "₩", inr: "₹",
@@ -138,9 +165,57 @@ const JP_NAMES = {
   algo: "アルゴランド", vet: "ヴィチェーン", icp: "インターネットコンピューター",
 };
 
+// ─────────────────────────────────────────
+// 仮想通貨アイコンのキャッシュ(メモリ内)
+// 一度取得したURLは再利用してリクエスト削減
+// ─────────────────────────────────────────
+const iconUrlCache = new Map(); // code → resolved URL
+const iconFailedSet = new Set(); // code → 全部失敗した記録
+
+// 通貨コード→ハッシュ→ブランドカラー(フォールバック表示用)
+function getBrandColor(code) {
+  // よくある通貨は手動マッピング
+  const brand = {
+    btc: "#f7931a", eth: "#627eea", usdt: "#26a17b", usdc: "#2775ca",
+    bnb: "#f3ba2f", xrp: "#23292f", ada: "#0033ad", sol: "#9945ff",
+    doge: "#c3a634", dot: "#e6007a", matic: "#8247e5", ltc: "#345d9d",
+    trx: "#ff060a", shib: "#ff6c39", avax: "#e84142", link: "#2a5ada",
+    atom: "#5064fb", uni: "#ff007a", xlm: "#7d00ff", near: "#000000",
+    algo: "#000000", fil: "#0090ff", icp: "#3b00b9", apt: "#000000",
+    arb: "#28a0f0", op: "#ff0420", aave: "#b6509e", pepe: "#479e00",
+    bch: "#8dc351", etc: "#328332", ftm: "#13b5ec", sand: "#00aaff",
+    mana: "#ff2d55", xmr: "#ff6600", flow: "#00ef8b", theta: "#2ab8e6",
+    sui: "#4ca2ff", tia: "#7b2bf9", sei: "#9e1f63", jup: "#fba03c",
+    inj: "#00f2fe", kas: "#70c7ba", rune: "#33ff99", cake: "#d1884f",
+    axs: "#0055d5", egld: "#1b46c2", hbar: "#000000", mkr: "#1aab9b",
+  };
+  if (brand[code]) return brand[code];
+  // ハッシュベースのカラー(暗めのHSL)
+  let hash = 0;
+  for (let i = 0; i < code.length; i++) {
+    hash = code.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 65%, 45%)`;
+}
+
 // 仮想通貨の公式アイコン(cryptocurrency-icons CDN経由・SVG)
 function coinIconUrl(code) {
   return `https://cdn.jsdelivr.net/npm/cryptocurrency-icons@latest/svg/color/${code.toLowerCase()}.svg`;
+}
+
+// CoinGeckoからアイコンURLを取得(thumb サイズ:小さくて高速)
+async function fetchCoingeckoIconUrl(code) {
+  const id = COINGECKO_IDS[code.toLowerCase()];
+  if (!id) return null;
+  try {
+    const r = await fetch(`${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false&sparkline=false`);
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data?.image?.small || data?.image?.thumb || null;
+  } catch {
+    return null;
+  }
 }
 
 // ─────────────────────────────────────────
@@ -542,15 +617,25 @@ export default function CryptoConverter() {
   const feeAmountDisplay = feeCurrency === "from" ? feeAmountFrom : feeAmountTo;
   const feeCurrencyObj = feeCurrency === "from" ? from : to;
 
-  const fmt = (n, type) => {
+  // 通貨に応じた桁数で整形
+  // 第3引数codeが渡された場合、通貨別の桁数を採用
+  const fmt = (n, type, code) => {
     if (!isFinite(n) || n === null || n === undefined) return "—";
+
     if (type === "crypto") {
       if (n === 0) return "0";
       if (Math.abs(n) < 0.00001) return n.toExponential(4);
+      // 仮想通貨は小さい値なら最大8桁、大きい値なら最大8桁(末尾0除去)
       if (Math.abs(n) < 1) return n.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
       return n.toLocaleString("ja-JP", { maximumFractionDigits: 8 });
     }
-    return n.toLocaleString("ja-JP", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+
+    // 法定通貨:codeが指定されていればそれに応じた桁数、なければ2桁デフォルト
+    const decimals = code ? getDecimals(code, type) : 2;
+    return n.toLocaleString("ja-JP", {
+      maximumFractionDigits: decimals,
+      minimumFractionDigits: decimals,
+    });
   };
 
   // ─────────────────────────────────────────
@@ -571,7 +656,7 @@ export default function CryptoConverter() {
   const shareText = () => {
     if (!from || !to) return "";
     const dt = now.toLocaleString("ja-JP");
-    return `💱 ${fmt(amt, from.type)} ${from.code.toUpperCase()} → ${fmt(net, to.type)} ${to.code.toUpperCase()}\nレート: 1 ${from.code.toUpperCase()} = ${fmt(rate, to.type)} ${to.code.toUpperCase()}\n手数料前: ${fmt(gross, to.type)} ${to.code.toUpperCase()}\n手数料: ${feeP}% (-${fmt(feeAmountDisplay, feeCurrencyObj?.type)} ${feeCurrencyObj?.code.toUpperCase()})\n(${dt})`;
+    return `💱 ${fmt(amt, from.type, from.code)} ${from.code.toUpperCase()} → ${fmt(net, to.type, to.code)} ${to.code.toUpperCase()}\nレート: 1 ${from.code.toUpperCase()} = ${fmt(rate, to.type, to.code)} ${to.code.toUpperCase()}\n手数料前: ${fmt(gross, to.type, to.code)} ${to.code.toUpperCase()}\n手数料: ${feeP}% (-${fmt(feeAmountDisplay, feeCurrencyObj?.type, feeCurrencyObj?.code)} ${feeCurrencyObj?.code.toUpperCase()})\n(${dt})`;
   };
 
   const doShare = async () => {
@@ -800,7 +885,7 @@ export default function CryptoConverter() {
                 {mode === "reverse" ? "計算された手数料 FEE" : "手数料 FEE"}
               </span>
               <span className="text-[11px] text-zinc-500 tabular-nums truncate ml-2">
-                -{fmt(feeAmountDisplay, feeCurrencyObj?.type)} {feeCurrencyObj?.code.toUpperCase()}
+                -{fmt(feeAmountDisplay, feeCurrencyObj?.type, feeCurrencyObj?.code)} {feeCurrencyObj?.code.toUpperCase()}
               </span>
             </div>
 
@@ -872,19 +957,19 @@ export default function CryptoConverter() {
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-zinc-500">手数料前</span>
                   <span className="tabular-nums text-zinc-700 font-semibold">
-                    {fmt(feeCurrency === "from" ? amt : gross, feeCurrencyObj?.type)} {feeCurrencyObj?.code.toUpperCase()}
+                    {fmt(feeCurrency === "from" ? amt : gross, feeCurrencyObj?.type, feeCurrencyObj?.code)} {feeCurrencyObj?.code.toUpperCase()}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-zinc-500">手数料 ({feeP}%)</span>
                   <span className="tabular-nums text-red-600 font-semibold">
-                    -{fmt(feeAmountDisplay, feeCurrencyObj?.type)} {feeCurrencyObj?.code.toUpperCase()}
+                    -{fmt(feeAmountDisplay, feeCurrencyObj?.type, feeCurrencyObj?.code)} {feeCurrencyObj?.code.toUpperCase()}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-dashed border-zinc-300">
                   <span className="text-zinc-500 font-semibold">手数料後</span>
                   <span className="tabular-nums text-emerald-600 font-bold">
-                    {fmt(feeCurrency === "from" ? amt - feeAmountFrom : net, feeCurrencyObj?.type)} {feeCurrencyObj?.code.toUpperCase()}
+                    {fmt(feeCurrency === "from" ? amt - feeAmountFrom : net, feeCurrencyObj?.type, feeCurrencyObj?.code)} {feeCurrencyObj?.code.toUpperCase()}
                   </span>
                 </div>
               </div>
@@ -900,7 +985,7 @@ export default function CryptoConverter() {
                 <span className="text-red-600">{error}</span>
               ) : rate && from && to ? (
                 <>
-                  1 {from.code.toUpperCase()} = <span className="text-emerald-600 font-semibold">{fmt(rate, to.type)}</span> {to.code.toUpperCase()}
+                  1 {from.code.toUpperCase()} = <span className="text-emerald-600 font-semibold">{fmt(rate, to.type, to.code)}</span> {to.code.toUpperCase()}
                   {/* 変動矢印(前回レートとの比較) */}
                   {prevRate && prevRate !== rate && (
                     <span className={`ml-1 text-[10px] font-bold ${rate > prevRate ? "text-emerald-600" : "text-red-500"}`}>
@@ -943,6 +1028,46 @@ export default function CryptoConverter() {
             </div>
           )}
         </div>
+
+        {/* ワンタップピン留めボタン */}
+        {from && to && from.code !== to.code && (
+          <div className="mt-3 flex gap-2">
+            {/* FROM側のピン留め */}
+            <button
+              type="button"
+              onClick={() => togglePin(from.code)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-semibold text-xs transition border ${
+                pinned.includes(from.code)
+                  ? "bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100"
+                  : "bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-50 hover:border-amber-200"
+              }`}
+            >
+              <Pin className={`w-3.5 h-3.5 ${pinned.includes(from.code) ? "fill-amber-500 text-amber-500" : ""}`} />
+              <CurrencyIcon code={from.code} type={from.type} size={16} />
+              <span>{from.code.toUpperCase()}</span>
+              <span className="text-[10px] text-zinc-400">
+                {pinned.includes(from.code) ? "ピン留め済み" : "ピン留め"}
+              </span>
+            </button>
+            {/* TO側のピン留め */}
+            <button
+              type="button"
+              onClick={() => togglePin(to.code)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-semibold text-xs transition border ${
+                pinned.includes(to.code)
+                  ? "bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100"
+                  : "bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-50 hover:border-amber-200"
+              }`}
+            >
+              <Pin className={`w-3.5 h-3.5 ${pinned.includes(to.code) ? "fill-amber-500 text-amber-500" : ""}`} />
+              <CurrencyIcon code={to.code} type={to.type} size={16} />
+              <span>{to.code.toUpperCase()}</span>
+              <span className="text-[10px] text-zinc-400">
+                {pinned.includes(to.code) ? "ピン留め済み" : "ピン留め"}
+              </span>
+            </button>
+          </div>
+        )}
 
         {/* 共有 */}
         <div className="mt-5 relative">
@@ -1098,8 +1223,14 @@ export default function CryptoConverter() {
 
 // ─────────────────────────────────────────
 function CurrencyIcon({ code, type, size = 24 }) {
-  const [failed, setFailed] = useState(false);
   const lower = code.toLowerCase();
+  const [stage, setStage] = useState(() => {
+    // キャッシュ済みなら最終解決URLから開始
+    if (iconUrlCache.has(lower)) return "resolved";
+    if (iconFailedSet.has(lower)) return "fallback";
+    return "primary"; // cryptocurrency-icons CDN
+  });
+  const [coingeckoUrl, setCoingeckoUrl] = useState(null);
 
   if (type === "fiat") {
     // 国旗絵文字
@@ -1122,8 +1253,26 @@ function CurrencyIcon({ code, type, size = 24 }) {
     );
   }
 
-  // 仮想通貨:cryptocurrency-icons の SVG
-  if (!failed) {
+  // ─── 仮想通貨:多段フォールバック ───
+  // 1. cryptocurrency-icons CDN(高速・主要通貨)
+  // 2. CoinGecko API(マイナー通貨)
+  // 3. ブランドカラーの丸 + 文字(最終)
+
+  const handlePrimaryError = async () => {
+    // CoinGeckoから取得を試みる(非同期)
+    const url = await fetchCoingeckoIconUrl(lower);
+    if (url) {
+      iconUrlCache.set(lower, url);
+      setCoingeckoUrl(url);
+      setStage("coingecko");
+    } else {
+      iconFailedSet.add(lower);
+      setStage("fallback");
+    }
+  };
+
+  // ステージごとにレンダリング
+  if (stage === "primary") {
     return (
       <img
         src={coinIconUrl(lower)}
@@ -1131,17 +1280,58 @@ function CurrencyIcon({ code, type, size = 24 }) {
         width={size}
         height={size}
         className="rounded-full"
-        onError={() => setFailed(true)}
+        onError={handlePrimaryError}
       />
     );
   }
 
+  if (stage === "resolved") {
+    // キャッシュから取得済みURLを使用
+    return (
+      <img
+        src={iconUrlCache.get(lower)}
+        alt={code}
+        width={size}
+        height={size}
+        className="rounded-full"
+        onError={() => {
+          iconUrlCache.delete(lower);
+          iconFailedSet.add(lower);
+          setStage("fallback");
+        }}
+      />
+    );
+  }
+
+  if (stage === "coingecko" && coingeckoUrl) {
+    return (
+      <img
+        src={coingeckoUrl}
+        alt={code}
+        width={size}
+        height={size}
+        className="rounded-full"
+        onError={() => {
+          iconFailedSet.add(lower);
+          setStage("fallback");
+        }}
+      />
+    );
+  }
+
+  // 最終フォールバック:ブランドカラー丸 + 文字
+  const color = getBrandColor(lower);
   return (
     <div
-      className="rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold"
-      style={{ width: size, height: size, fontSize: size * 0.35 }}
+      className="rounded-full flex items-center justify-center font-bold text-white"
+      style={{
+        width: size,
+        height: size,
+        fontSize: size * 0.38,
+        backgroundColor: color,
+      }}
     >
-      {code.slice(0, 3).toUpperCase()}
+      {code.slice(0, code.length <= 4 ? code.length : 3).toUpperCase()}
     </div>
   );
 }
