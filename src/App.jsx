@@ -298,6 +298,7 @@ export default function CryptoConverter() {
   const [pickerOpen, setPickerOpen] = useState(null);
   const [history, setHistory] = useState([]);
   const [pinned, setPinned] = useState([]); // ピン留め通貨コード配列
+  const [defaultPair, setDefaultPair] = useState(null); // {from: {code,type}, to: {code,type}} または null
   const [currencies, setCurrencies] = useState({}); // { code: name }
   const [initLoading, setInitLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -373,15 +374,92 @@ export default function CryptoConverter() {
     });
   }, []);
 
-  // 初期ロード:通貨一覧取得
+  // デフォルト通貨ペアの保存
+  // 現在のFROM/TOを「アプリ起動時のデフォルト」として永続保存する
+  const saveDefaultPair = useCallback(() => {
+    if (!from || !to) return;
+    const pair = {
+      from: { code: from.code, type: from.type },
+      to:   { code: to.code,   type: to.type },
+    };
+    const serialized = JSON.stringify(pair);
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("default-pair-v1", serialized);
+      }
+    } catch (e) {
+      console.warn("デフォルト通貨の保存に失敗:", e);
+    }
+    if (window.storage && window.storage.set) {
+      window.storage.set("default-pair-v1", serialized).catch(() => {});
+    }
+    setDefaultPair(pair);
+  }, [from, to]);
+
+  // デフォルト通貨ペアの解除(初回起動時の状態に戻る)
+  const clearDefaultPair = useCallback(() => {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.removeItem("default-pair-v1");
+      }
+    } catch (e) {
+      console.warn("デフォルト通貨の削除に失敗:", e);
+    }
+    if (window.storage && window.storage.delete) {
+      window.storage.delete("default-pair-v1").catch(() => {});
+    }
+    setDefaultPair(null);
+  }, []);
+
+  // 現在のFROM/TOが、保存済みデフォルトと一致するか
+  const isCurrentPairDefault = useMemo(() => {
+    if (!defaultPair || !from || !to) return false;
+    return (
+      defaultPair.from?.code === from.code &&
+      defaultPair.to?.code === to.code
+    );
+  }, [defaultPair, from, to]);
+
+  // 初期ロード:通貨一覧取得 + 保存済みデフォルトの復元
   useEffect(() => {
     (async () => {
       try {
         const data = await fetchJson("/currencies.min.json");
         setCurrencies(data);
-        // デフォルト選択
-        setFrom({ code: "btc", name: data.btc || "Bitcoin", type: "crypto" });
-        setTo({   code: "jpy", name: data.jpy || "Japanese yen", type: "fiat" });
+
+        // 保存済みのデフォルト通貨を読み込む
+        let savedDefault = null;
+        try {
+          if (typeof localStorage !== "undefined") {
+            const raw = localStorage.getItem("default-pair-v1");
+            if (raw) savedDefault = JSON.parse(raw);
+          }
+          if (!savedDefault && window.storage?.get) {
+            const r = await window.storage.get("default-pair-v1");
+            if (r?.value) savedDefault = JSON.parse(r.value);
+          }
+        } catch (e) {
+          console.warn("デフォルト通貨の読み込みに失敗:", e);
+        }
+
+        if (savedDefault?.from && savedDefault?.to) {
+          // 保存済みのペアを復元
+          setFrom({
+            code: savedDefault.from.code,
+            name: data[savedDefault.from.code] || savedDefault.from.code,
+            type: savedDefault.from.type,
+          });
+          setTo({
+            code: savedDefault.to.code,
+            name: data[savedDefault.to.code] || savedDefault.to.code,
+            type: savedDefault.to.type,
+          });
+          setDefaultPair(savedDefault);
+        } else {
+          // 初回起動時のデフォルト
+          setFrom({ code: "btc", name: data.btc || "Bitcoin", type: "crypto" });
+          setTo({   code: "jpy", name: data.jpy || "Japanese yen", type: "fiat" });
+        }
       } catch (e) {
         setError("通貨リスト取得失敗");
       } finally {
@@ -1148,6 +1226,37 @@ export default function CryptoConverter() {
               </span>
             </button>
           </div>
+        )}
+
+        {/* デフォルト通貨ペア保存ボタン */}
+        {from && to && (
+          <button
+            type="button"
+            onClick={isCurrentPairDefault ? clearDefaultPair : saveDefaultPair}
+            className={`mt-2 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-xs transition border ${
+              isCurrentPairDefault
+                ? "bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100"
+                : "bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-50 hover:border-amber-200"
+            }`}
+            title={isCurrentPairDefault ? "デフォルトを解除" : "起動時の通貨をここに固定"}
+          >
+            <span className={isCurrentPairDefault ? "text-amber-500" : "text-zinc-400"}>
+              {isCurrentPairDefault ? "★" : "☆"}
+            </span>
+            {isCurrentPairDefault ? (
+              <>
+                <span>起動時のデフォルトに設定済み</span>
+                <span className="text-[10px] text-amber-600">(タップで解除)</span>
+              </>
+            ) : (
+              <>
+                <span>この組み合わせを起動時のデフォルトに設定</span>
+                <span className="text-[10px] text-zinc-400">
+                  ({from.code.toUpperCase()} → {to.code.toUpperCase()})
+                </span>
+              </>
+            )}
+          </button>
         )}
 
         {/* 共有 */}
